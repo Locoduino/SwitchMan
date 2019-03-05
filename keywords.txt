@@ -1,0 +1,38 @@
+#######################################
+# Syntax Coloring Map For SwitchMan
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+DeadendTrack	KEYWORD1
+BlockTrack	KEYWORD1
+TurnoutTrack	KEYWORD1
+SingleslipTrack	KEYWORD1
+DoubleslipTrack	KEYWORD1
+CrossingTrack	KEYWORD1
+LoopTrack	KEYWORD1
+PathSet KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+next	KEYWORD2
+connect	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+INLET	LITERAL1
+OUTLET	LITERAL1
+LEFT_INLET	LITERAL1
+RIGHT_INLET	LITERAL1
+LEFT_OUTLET	LITERAL1
+RIGHT_OUTLET	LITERAL1
+
+FORWARD_DIRECTION	LITERAL1
+BACKWARD_DIRECTION	LITERAL1
+NO_DIRECTION	LITERAL1

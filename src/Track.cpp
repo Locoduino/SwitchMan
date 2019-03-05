@@ -1,4 +1,6 @@
 #include "Track.h"
+#include "PathSet.h"
+#include "HeadedTrackSet.h"
 
 #ifdef DEBUG
 /*
@@ -11,23 +13,26 @@ const char usedConnectorMsg[] PROGMEM =   "Connector already in use: ";
 
 #if defined(DEBUG) || defined(TRACE)
 
-void displayConnectorName(
-  const uint8_t inConnector,
-  const bool inNewLine = false)
+void displayConnectorName(const Connector inConnector)
 {
   switch (inConnector) {
-    case INLET:         Serial.print(F("INLET"));                 break;
-    case LEFT_INLET:    Serial.print(F("LEFT_INLET"));            break;
-    case RIGHT_INLET:   Serial.print(F("RIGHT_INLET"));           break;
-    case OUTLET:        Serial.print(F("OUTLET"));                break;
-    case LEFT_OUTLET:   Serial.print(F("LEFT_OUTLET"));           break;
-    case RIGHT_OUTLET:  Serial.print(F("RIGHT_OUTLET"));          break;
-    default:              Serial.print(F("** Unknown Connector **")); break;
+    case INLET:         Serial.print(F("INLET"));                   break;
+    case LEFT_INLET:    Serial.print(F("LEFT_INLET"));              break;
+    case RIGHT_INLET:   Serial.print(F("RIGHT_INLET"));             break;
+    case OUTLET:        Serial.print(F("OUTLET"));                  break;
+    case LEFT_OUTLET:   Serial.print(F("LEFT_OUTLET"));             break;
+    case RIGHT_OUTLET:  Serial.print(F("RIGHT_OUTLET"));            break;
+    default:            Serial.print(F("** Unknown Connector **")); break;
   }
-  if (inNewLine) Serial.println();
 }
 
-void displayDirection(uint8_t inDir)
+void displayConnectorNameln(const Connector inConnector)
+{
+  displayConnectorName(inConnector);
+  Serial.println();
+}
+
+void displayDirection(const Direction inDir)
 {
   switch (inDir) {
     case FORWARD_DIRECTION:   Serial.print('F');  break;
@@ -37,15 +42,40 @@ void displayDirection(uint8_t inDir)
   }
 }
 
-void displayTrack(
-  const Track * inTrack,
-  const bool inNewLine = false) __attribute__((weak))
+void displayTrack(const uint16_t inId)
 {
-  Serial.print(inTrack->identifier());
-  if (inNewLine) Serial.println();
+  Track::trackForId(inId).print();
 }
 
-void displayTrackConnector(const Track * inTrack, const uint8_t inConnector)
+void displayTrack(const Track * inTrack)
+{
+  inTrack->print();
+}
+
+void displayTrack(const Track & inTrack)
+{
+  inTrack.print();
+}
+
+void displayTrackln(const uint16_t inId)
+{
+  displayTrack(inId);
+  Serial.println();
+}
+
+void displayTrackln(const Track * inTrack)
+{
+  displayTrack(inTrack);
+  Serial.println();
+}
+
+void displayTrackln(const Track & inTrack)
+{
+  displayTrack(inTrack);
+  Serial.println();
+}
+
+void displayTrackConnector(const Track * inTrack, const Connector inConnector)
 {
   Serial.print('[');
   displayTrack(inTrack);
@@ -61,7 +91,7 @@ void depthDisplayTrack(const Track * inTrack)
 {
   uint16_t i = gDepth << 2;
   while (i--) Serial.print(' ');
-  displayTrack(inTrack, true);
+  displayTrackln(inTrack);
 }
 
 #define ddTrack(track) depthDisplayTrack(track)
@@ -83,21 +113,22 @@ void depthDisplayTrack(const Track * inTrack)
  */
 uint16_t Track::sCount = 0;
 uint16_t Track::sTrackTableSize = 16;
-Track ** Track::sTracks = NULL;
+Track **Track::sTracks = NULL;
 bool Track::sTrackNetOk = false;
 
 /*---------------------------------------------------------------------------*/
-Track::Track(NAME_DECL_ALONE)
+Track::Track(NAME_DECL_FIRST(inName) const uint16_t inId) :
 #ifdef DEBUG
-  : mName(inName)
+  mName(inName),
 #endif
+  mIdentifier(inId),
+  mDirection(NO_DIRECTION)
 {
   if (sTracks == NULL) {
     sTracks = (Track **)malloc(sTrackTableSize * sizeof(Track **));
   }
 
-  mIdentifier = sCount++;
-  mDirection = NO_DIRECTION;
+  sCount++;
 
   if (mIdentifier >= sTrackTableSize) {
     sTrackTableSize = sTrackTableSize * 2;
@@ -117,21 +148,21 @@ void Track::finalize()
 }
 
 /*---------------------------------------------------------------------------*/
-void Track::setDirection(uint8_t inDir)
+void Track::setDirection(const Direction inDir)
 {
   if (mDirection == NO_DIRECTION || mDirection == inDir) mDirection = inDir;
 #ifdef DEBUG
   else {
     Serial.print(F("Direction already set: "));
-    displayTrack(this, true);
+    displayTrackln(this);
   }
 #endif
 }
 
 /*---------------------------------------------------------------------------*/
-bool Track::pathTo(Track & inTrack, uint8_t inDir, PathSet & ioPaths)
+bool Track::pathsTo(Track & inTrack, const Direction inDir, PathSet & ioPaths)
 {
-#if TRACE
+#ifdef TRACE
   gDepth = 0;
 #endif
   HeadedTrackSet marking;
@@ -139,42 +170,81 @@ bool Track::pathTo(Track & inTrack, uint8_t inDir, PathSet & ioPaths)
 }
 
 /*---------------------------------------------------------------------------*/
-bool Track::pathTo(uint16_t inId, uint8_t inDir, PathSet & ioPaths)
+bool Track::pathsTo(uint16_t inId, const Direction inDir, PathSet & ioPaths)
 {
-#if TRACE
+#ifdef TRACE
   gDepth = 0;
 #endif
   HeadedTrackSet marking;
   return allPathsTo(inId, inDir, ioPaths, NULL, marking);
 }
 
+/*---------------------------------------------------------------------------*/
+Track & Track::trackForId(uint16_t inId)
+{
+  return *(sTracks[inId]);
+}
+
+#ifdef DEBUG
+void Track::print() const
+{
+  char buf[32];
+  strcpy_P(buf, (char *)pgm_read_word(mName));
+  Serial.print(buf);
+}
+
+void Track::println() const
+{
+  print();
+  Serial.println();
+}
+#endif
+
 /*=============================================================================
  * Dead-end track
  */
-DeadEndTrack::DeadEndTrack(NAME_DECL_FIRST uint16_t inLength) :
-  Track(NAME_ARG), mOutTrack(NULL), mLength(0)
+DeadendTrack::DeadendTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
+  Track(NAME_ARG_FIRST(inName) inId), mOutTrack(NULL)
 {}
 
 /*---------------------------------------------------------------------------*/
-void DeadEndTrack::connectTo(const Track & inTrack, const uint8_t inConnector)
+bool DeadendTrack::connect(
+  const Connector inFromConnector,
+  Track & inToTrack,
+  const Connector inToConnector)
 {
+  bool result = true;
+
   if (mOutTrack == NULL) {
-    mOutTrack = &inTrack;
-    mOutTrack->connectFrom(this, inConnector);
-    setDirection(FORWARD_DIRECTION);
-  }
+    if (inFromConnector == OUTLET) {
+      mOutTrack = &inToTrack;
+      mOutTrack->connectFrom(this, inToConnector);
+      setDirection(FORWARD_DIRECTION);
+    }
 #ifdef DEBUG
+    else {
+      Serial.print(F("DeadendTrack::connect/"));
+      Serial.print(connectorErrorMsg);
+      displayConnectorName(inFromConnector);
+    }
+#endif
+  }
   else {
-    Serial.print(F("DeadEndTrack::connectTo/"));
+    result = false;
+#ifdef DEBUG
+    Serial.print(F("DeadendTrack::connect/"));
     Serial.print(usedConnectorMsg);
     displayTrackConnector(this, OUTLET);
-  }
 #endif
+  }
+  return result;
 }
 
 /*---------------------------------------------------------------------------*/
-void DeadEndTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
+bool DeadendTrack::connectFrom(Track * inTrack, const Connector inConnector)
 {
+  bool result = true;
+
   if (inConnector == OUTLET) {
     if (mOutTrack == NULL) {
       mOutTrack = inTrack;
@@ -188,37 +258,39 @@ void DeadEndTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
     }
 #endif
   }
-#ifdef DEBUG
   else {
+    result = false;
+#ifdef DEBUG
     Serial.print(F("DeadEndTrack::connectFrom/"));
     Serial.print(connectorErrorMsg);
     displayTrackConnector(this, inConnector);
-  }
 #endif
+  }
+  return result;
 }
 
 /*---------------------------------------------------------------------------*/
-bool DeadEndTrack::allPathsTo(
-  const uint16_t inId,        /* id of the target track     */
-  const uint8_t inDir,        /* travel direction           */
-  PathSet &ioPaths,           /* found paths                */
-  const Track * inFrom,       /* track used to get there    */
-  HeadedTrackSet &inMarking)  /* to mark the visited tracks */
+bool DeadendTrack::allPathsTo(
+  const uint16_t inId,                          /* id of the target track     */
+  const Direction inDir,                        /* travel direction           */
+  PathSet & ioPaths,                            /* found paths                */
+  __attribute__((unused)) const Track * inFrom, /* track used to get there    */
+  HeadedTrackSet & ioMarking)                   /* to mark the visited tracks */
 {
   ensureTrackNetOk();
   ddTrack(this);
   incDepth();
   bool result = false;
-  if (! marking.containsTrack(this,inDir))
+  if (! ioMarking.containsTrack(this,inDir))
   {
-    marking.addTrack(this, inDir);
+    ioMarking.addTrack(this, inDir);
     if (inId == identifier()) { /* found */
       ioPaths.addTrack(this);
       result = true;
     }
     else {
       if (direction() == FORWARD_DIRECTION && direction() == inDir) {
-        if (mOutTrack->allPathsTo(inId, inDir, ioPaths, this, marking)) {
+        if (mOutTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
           ioPaths.addTrack(this);
           result = true;
         }
@@ -232,47 +304,71 @@ bool DeadEndTrack::allPathsTo(
 /*=============================================================================
  * Normal track
  */
-NormalTrack::NormalTrack(NAME_DECL_FIRST uint16_t inLength) :
-  Track(NAME_ARG), mInTrack(NULL), mOutTrack(NULL), mLength(inLength)
+BlockTrack::BlockTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
+  Track(NAME_ARG_FIRST(inName) inId), mInTrack(NULL), mOutTrack(NULL)
 {}
 
 /*---------------------------------------------------------------------------*/
-void NormalTrack::connectInTo(Track & inTrack, uint8_t inConnector)
+bool BlockTrack::connect(
+  const Connector inFromConnector,
+  Track &         inToTrack,
+  const Connector inToConnector)
 {
-  if (mInTrack == NULL) {
-    mInTrack = &inTrack;
-    mInTrack->connectFrom(this, inConnector);
-    setDirection(BACKWARD_DIRECTION);
-  }
+  bool result = true;
+
+  switch (inFromConnector) {
+
+    case INLET:
+      if (mInTrack == NULL) {
+        mInTrack = &inToTrack;
+        mInTrack->connectFrom(this, inToConnector);
+        setDirection(BACKWARD_DIRECTION);
+      }
 #ifdef DEBUG
-  else {
-    Serial.print(F("NormalTrack::connectInTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, INLET);
-  }
+      else {
+        Serial.print(F("BlockTrack::connect_INLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, INLET);
+      }
 #endif
-}
+      break;
 
-/*---------------------------------------------------------------------------*/
-void NormalTrack::connectOutTo(Track & inTrack, uint8_t inConnector)
-{
-  if (mOutTrack == NULL) {
-    mOutTrack = &inTrack;
-    mOutTrack->connectFrom(this, inConnector);
-    setDirection(FORWARD_DIRECTION);
+    case OUTLET:
+      if (mOutTrack == NULL) {
+        mOutTrack = &inToTrack;
+        mOutTrack->connectFrom(this, inToConnector);
+        setDirection(FORWARD_DIRECTION);
+      }
+#ifdef DEBUG
+      else {
+        Serial.print(F("BlockTrack::connect_OUTLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, OUTLET);
+      }
+#endif
+      break;
+    case LEFT_INLET:
+    case LEFT_OUTLET:
+    case RIGHT_INLET:
+    case RIGHT_OUTLET:
+    default:
+      result = false;
+#ifdef DEBUG
+      Serial.print(F("BlockTrack::connect/"));
+      Serial.print(connectorErrorMsg);
+      displayTrackConnector(this, inFromConnector);
+#endif
+      break;
   }
-  #ifdef DEBUG
-    else {
-      Serial.print(F("NormalTrack::connectOutTo/"));
-      Serial.print(usedConnectorMsg);
-      displayTrackConnector(this, OUTLET);
-    }
-  #endif
+  return result;
 }
 
 /*---------------------------------------------------------------------------*/
-void NormalTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
+bool BlockTrack::connectFrom(
+  Track * inTrack,
+  const Connector inConnector)
 {
+  bool result = true;
 #ifdef DEBUG
   bool error = false;
 #endif
@@ -287,7 +383,7 @@ void NormalTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
 #ifdef DEBUG
       else error = true;
 #endif
-      break:
+      break;
 
     case INLET:
       if (mInTrack == NULL) {
@@ -299,50 +395,56 @@ void NormalTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
 #endif
       break;
 
-#ifdef DEBUG
+    case LEFT_INLET:
+    case LEFT_OUTLET:
+    case RIGHT_INLET:
+    case RIGHT_OUTLET:
     default:
-      Serial.print(F("NormalTrack::connectFrom/"));
+      result = false;
+#ifdef DEBUG
+      Serial.print(F("BlockTrack::connectFrom/"));
       Serial.print(connectorErrorMsg);
       displayTrackConnector(this, inConnector);
-      break;
 #endif
+      break;
   }
 #ifdef DEBUG
   if (error) {
-    Serial.print(F("NormalTrack::connectFrom/"));
+    Serial.print(F("BlockTrack::connectFrom/"));
     Serial.print(usedConnectorMsg);
     displayTrackConnector(this, inConnector);
   }
 #endif
+  return result;
 }
 
 /*---------------------------------------------------------------------------*/
-bool NormalTrack::allPathsTo(
-  const uint16_t inId,        /* id of the target track     */
-  const uint8_t inDir,        /* travel direction           */
-  PathSet &ioPaths,           /* found paths                */
-  const Track * inFrom,       /* track used to get there    */
-  HeadedTrackSet &inMarking)  /* to mark the visited tracks */
+bool BlockTrack::allPathsTo(
+  const uint16_t inId,                          /* id of the target track     */
+  const Direction inDir,                        /* travel direction           */
+  PathSet & ioPaths,                            /* found paths                */
+  __attribute__((unused)) const Track * inFrom, /* track used to get there    */
+  HeadedTrackSet & ioMarking)                   /* to mark the visited tracks */
 {
   ensureTrackNetOk();
   ddTrack(this);
   incDepth();
   bool result = false;
-  if (! marking.containsTrack(this,inDir)) {
-    marking.addTrack(this, inDir);
+  if (! ioMarking.containsTrack(this,inDir)) {
+    ioMarking.addTrack(this, inDir);
     if (inId == identifier()) { /* found */
       ioPaths.addTrack(this);
       result = true;
     }
     else {
       if (direction() == inDir) {
-        if (mOutTrack->allPathsTo(inId, inDir, ioPaths, this, inMarking)) {
+        if (mOutTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
           ioPaths.addTrack(this);
           result = true;
         }
       }
       else {
-        if (mInTrack->allPathsTo(inId, inDir, ioPaths, this, inMarking)) {
+        if (mInTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
           ioPaths.addTrack(this);
           result = true;
         }
@@ -356,65 +458,89 @@ bool NormalTrack::allPathsTo(
 /*=============================================================================
  * Turnout track
  */
-TurnoutTrack::TurnoutTrack(NAME_DECL_FIRST uint16_t inLeftLength, uint16_t inRightLength) :
-  Track(NAME_ARG), mInTrack(NULL), mOutLeftTrack(NULL), mOutRightTrack(NULL),
-  mLeftLength(inLeftLength), mRightLength(inRightLength), mPartialPath(NULL)
+TurnoutTrack::TurnoutTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
+  Track(NAME_ARG_FIRST(inName) inId),
+  mInTrack(NULL),
+  mOutLeftTrack(NULL),
+  mOutRightTrack(NULL),
+  mPartialPath(NULL)
 {}
 
 /*---------------------------------------------------------------------------*/
-void TurnoutTrack::connectInTo(Track & inTrack, uint8_t inConnector)
+bool TurnoutTrack::connect(
+  const Connector inFromConnector,
+  Track &         inToTrack,
+  const Connector inToConnector)
 {
-  if (mInTrack == NULL) {
-    mInTrack = &inTrack;
-    mInTrack->connectFrom(this, inConnector);
-    setDirection(BACKWARD_DIRECTION);
-  }
+  bool result = true;
+
+  switch (inFromConnector) {
+
+    case INLET:
+      if (mInTrack == NULL) {
+        mInTrack = &inToTrack;
+        mInTrack->connectFrom(this, inToConnector);
+        setDirection(BACKWARD_DIRECTION);
+      }
 #ifdef DEBUG
-  else {
-    Serial.print(F("TurnoutTrack::connectInTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, INLET);
-  }
+      else {
+        Serial.print(F("TurnoutTrack::connect_INLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, INLET);
+      }
 #endif
+      break;
+
+    case LEFT_OUTLET:
+      if (mOutLeftTrack == NULL) {
+        mOutLeftTrack = &inToTrack;
+        mOutLeftTrack->connectFrom(this, inToConnector);
+        setDirection(FORWARD_DIRECTION);
+      }
+#ifdef DEBUG
+      else {
+        Serial.print(F("TurnoutTrack::connect_LEFT_OUTLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, LEFT_OUTLET);
+      }
+#endif
+      break;
+
+    case RIGHT_OUTLET:
+      if (mOutRightTrack == NULL) {
+        mOutRightTrack = &inToTrack;
+        mOutRightTrack->connectFrom(this, inToConnector);
+        setDirection(FORWARD_DIRECTION);
+      }
+#ifdef DEBUG
+      else {
+        Serial.print(F("TurnoutTrack::connect_RIGHT_OUTLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, RIGHT_OUTLET);
+      }
+#endif
+      break;
+
+    case LEFT_INLET:
+    case RIGHT_INLET:
+    case OUTLET:
+    default:
+      result = false;
+#ifdef DEBUG
+      Serial.print(F("TurnoutTrack::connect/"));
+      Serial.print(connectorErrorMsg);
+      displayTrackConnector(this, inFromConnector);
+#endif
+      break;
+  }
+  return result;
 }
 
 /*---------------------------------------------------------------------------*/
-void TurnoutTrack::connectOutLeftTo(Track & inTrack, uint8_t inConnector)
+bool TurnoutTrack::connectFrom(Track * inTrack, const Connector inConnector)
 {
-  if (mOutLeftTrack == NULL) {
-    mOutLeftTrack = &inTrack;
-    mOutLeftTrack->connectFrom(this, inConnector);
-    setDirection(FORWARD_DIRECTION);
-  }
-#ifdef DEBUG
-  else {
-    Serial.print(F("TurnoutTrack::connectOutLeftTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, LEFT_OUTLET);
-  }
-#endif
-}
+  bool result = true;
 
-/*---------------------------------------------------------------------------*/
-void TurnoutTrack::connectOutRightTo(Track & inTrack, uint8_t inConnector)
-{
-  if (mOutRightTrack == NULL) {
-    mOutRightTrack = &inTrack;
-    mOutRightTrack->connectFrom(this, inConnector);
-    setDirection(FORWARD_DIRECTION);
-  }
-#ifdef DEBUG
-  else {
-    Serial.print(F("TurnoutTrack::connectOutRightTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, RIGHT_OUTLET);
-  }
-#endif
-}
-
-/*---------------------------------------------------------------------------*/
-void TurnoutTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
-{
   #ifdef DEBUG
     bool error = false;
   #endif
@@ -451,13 +577,17 @@ void TurnoutTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
 #endif
       break;
 
-#ifdef DEBUG
+    case LEFT_INLET:
+    case RIGHT_INLET:
+    case OUTLET:
     default:
+      result = false;
+#ifdef DEBUG
       Serial.print(F("TurnoutTrack::connectFrom/"));
       Serial.print(connectorErrorMsg);
       displayTrackConnector(this, inConnector);
-      break;
 #endif
+      break;
   }
 #ifdef DEBUG
   if (error) {
@@ -466,21 +596,22 @@ void TurnoutTrack::connectFrom(const Track * inTrack, const uint8_t inConnector)
     displayTrackConnector(this, inConnector);
   }
 #endif
+  return result;
 }
 
 /*---------------------------------------------------------------------------*/
 bool TurnoutTrack::allPathsTo(
   const uint16_t inId,
-  const uint8_t inDir,
-  PathSet &ioPaths,
-  const Track * inFrom,
-  HeadedTrackSet &inMarking)
+  const Direction inDir,
+  PathSet & ioPaths,
+  __attribute__((unused)) const Track * inFrom,
+  HeadedTrackSet & ioMarking)
 {
   ensureTrackNetOk();
   ddTrack(this);
   incDepth();
   bool result = false;
-  if (marking.containsTrack(this,inDir)) {
+  if (ioMarking.containsTrack(this,inDir)) {
     /*
      * track already looked up.
      * 1) a partial path has been left: a path to the target exists and hads
@@ -498,7 +629,7 @@ bool TurnoutTrack::allPathsTo(
     else result = false;
   }
   else {
-    marking.addTrack(this, inDir);
+    ioMarking.addTrack(this, inDir);
     /*
      * remove the partiel path left by a previous
      * exploration if direction is out to in.
@@ -515,8 +646,8 @@ bool TurnoutTrack::allPathsTo(
     else {
       if (direction() == inDir) { /* travelling from in to out */
         PathSet rightPaths(ioPaths);
-        if (mOutLeftTrack->allPathsTo(inId, inDir, ioPaths, this, marking)) {
-          if (mOutRightTrack->allPathsTo(inId, inDir, rightPaths, this, marking)) {
+        if (mOutLeftTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
+          if (mOutRightTrack->allPathsTo(inId, inDir, rightPaths, this, ioMarking)) {
             /* Both paths lead to the target, merge the paths */
             ioPaths += rightPaths;
           }
@@ -525,14 +656,14 @@ bool TurnoutTrack::allPathsTo(
         }
         else {
           /* no path on the left, try on right */
-          if (mOutRightTrack->allPathsTo(inId, inDir, ioPaths, this, marking)) {
+          if (mOutRightTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
             ioPaths.addTrack(this);
             result = true;
           }
         }
       }
       else { /* travelling from out to in */
-        if (mInTrack->allPathsTo(inId, inDir, ioPaths, this, marking)) {
+        if (mInTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
           ioPaths.addTrack(this);
           mPartialPath = new PathSet(ioPaths);
           result = true;
@@ -547,91 +678,103 @@ bool TurnoutTrack::allPathsTo(
 /*=============================================================================
  * Crossing track
  */
-CrossingTrack::CrossingTrack(
-  NAME_DECL_FIRST
-  uint16_t inLeftToRightLength,
-  uint16_t inRightToLeftLength) :
-  Track(NAME_ARG), mInLeftTrack(NULL), mInRightTrack(NULL), mOutLeftTrack(NULL),
-  mOutRightTrack(NULL), mLeftToRightLength(inLeftToRightLength),
-  mRightToLeftLength(inRightToLeftLength)
+CrossingTrack::CrossingTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
+  Track(NAME_ARG_FIRST(inName) inId),
+  mInLeftTrack(NULL),
+  mInRightTrack(NULL),
+  mOutLeftTrack(NULL),
+  mOutRightTrack(NULL)
 {}
 
 /*---------------------------------------------------------------------------*/
-void CrossingTrack::connectInLeftTo(Track & inTrack, uint8_t inConnector)
+bool CrossingTrack::connect(
+  const Connector inFromConnector,
+  Track &         inToTrack,
+  const Connector inToConnector)
 {
-  if (mInLeftTrack == NULL) {
-    mInLeftTrack = &inTrack;
-    mInLeftTrack->connectFrom(this, inConnector);
-    setDirection(BACKWARD_DIRECTION);
-  }
-#ifdef DEBUG
-  else {
-    Serial.print(F("CrossingTrack::connectInLeftTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, LEFT_INLET);
-  }
-#endif
-}
+  bool result = true;
 
-/*---------------------------------------------------------------------------*/
-void CrossingTrack::connectInRightTo(Track & inTrack, uint8_t inConnector)
-{
-  if (mInRightTrack == NULL) {
-    mInRightTrack = &inTrack;
-    mInRightTrack->connectFrom(this, inConnector);
-    setDirection(BACKWARD_DIRECTION);
-  }
+  switch (inFromConnector) {
+    case LEFT_INLET:
+      if (mInLeftTrack == NULL) {
+        mInLeftTrack = &inToTrack;
+        mInLeftTrack->connectFrom(this, inToConnector);
+        setDirection(BACKWARD_DIRECTION);
+      }
 #ifdef DEBUG
-  else {
-    Serial.print(F("CrossingTrack::connectInRightTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, RIGHT_INLET);
-  }
+      else {
+        Serial.print(F("CrossingTrack::connect_LEFT_INLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, LEFT_INLET);
+      }
 #endif
-}
-
-/*---------------------------------------------------------------------------*/
-void CrossingTrack::connectOutLeftTo(Track & inTrack, uint8_t inConnector)
-{
-  if (mOutLeftTrack == NULL) {
-    mOutLeftTrack = &inTrack;
-    mOutLeftTrack->connectFrom(this, inConnector);
-    setDirection(FORWARD_DIRECTION);
-  }
-#ifdef DEBUG
-  else {
-    Serial.print(F("CrossingTrack::connectOutLeftTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, LEFT_OUTLET);
-  }
-#endif
-}
-
-/*---------------------------------------------------------------------------*/
-void CrossingTrack::connectOutRightTo(Track & inTrack, uint8_t inConnector)
-{
-  if (mOutRightTrack == NULL) {
-    mOutRightTrack = &inTrack;
-    mOutRightTrack->connectFrom(this, inConnector);
-    setDirection(FORWARD_DIRECTION);
-  }
-#ifdef DEBUG
-  else {
-    Serial.print(F("CrossingTrack::connectOutRightTo/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, RIGHT_OUTLET);
-  }
-#endif
-}
-
-/*---------------------------------------------------------------------------*/
-void CrossingTrack::connectFrom(
-  const Track * inTrack,
-  const uint8_t inConnector)
-{
+      break;
+    case RIGHT_INLET:
+      if (mInRightTrack == NULL) {
+        mInRightTrack = &inToTrack;
+        mInRightTrack->connectFrom(this, inToConnector);
+        setDirection(BACKWARD_DIRECTION);
+      }
   #ifdef DEBUG
-    bool error = false;
+      else {
+        Serial.print(F("CrossingTrack::connect_RIGHT_INLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, RIGHT_INLET);
+      }
   #endif
+      break;
+    case LEFT_OUTLET:
+      if (mOutLeftTrack == NULL) {
+        mOutLeftTrack = &inToTrack;
+        mOutLeftTrack->connectFrom(this, inToConnector);
+        setDirection(FORWARD_DIRECTION);
+      }
+#ifdef DEBUG
+      else {
+        Serial.print(F("CrossingTrack::connect_LEFT_OUTLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, LEFT_OUTLET);
+      }
+#endif
+      break;
+    case RIGHT_OUTLET:
+      if (mOutRightTrack == NULL) {
+        mOutRightTrack = &inToTrack;
+        mOutRightTrack->connectFrom(this, inToConnector);
+        setDirection(FORWARD_DIRECTION);
+      }
+#ifdef DEBUG
+      else {
+        Serial.print(F("CrossingTrack::connect_RIGHT_OUTLET/"));
+        Serial.print(usedConnectorMsg);
+        displayTrackConnector(this, RIGHT_OUTLET);
+      }
+#endif
+      break;
+
+    case INLET:
+    case OUTLET:
+    default:
+      result = false;
+#ifdef DEBUG
+      Serial.print(F("CrossingTrack::connect/"));
+      Serial.print(connectorErrorMsg);
+      displayTrackConnector(this, inFromConnector);
+#endif
+      break;
+  }
+  return result;
+}
+
+/*---------------------------------------------------------------------------*/
+bool CrossingTrack::connectFrom(
+  Track * inTrack,
+  const Connector inConnector)
+{
+  bool result = true;
+#ifdef DEBUG
+  bool error = false;
+#endif
 
   switch (inConnector) {
 
@@ -675,13 +818,16 @@ void CrossingTrack::connectFrom(
 #endif
       break;
 
-#ifdef DEBUG
+    case INLET:
+    case OUTLET:
     default:
+      result = false;
+#ifdef DEBUG
       Serial.print(F("CrossingTrack::connectFrom/"));
       Serial.print(connectorErrorMsg);
       displayTrackConnector(this, inConnector);
-      break;
 #endif
+      break;
   }
 #ifdef DEBUG
   if (error) {
@@ -690,15 +836,16 @@ void CrossingTrack::connectFrom(
     displayTrackConnector(this, inConnector);
   }
 #endif
+  return result;
 }
 
 /*---------------------------------------------------------------------------*/
 bool CrossingTrack::allPathsTo(
   const uint16_t inId,
-  const uint8_t inDir,
-  PathSet &ioPaths,
+  const Direction inDir,
+  PathSet & ioPaths,
   const Track * inFrom,
-  HeadedTrackSet &inMarking)
+  HeadedTrackSet & ioMarking)
 {
   ensureTrackNetOk();
   ddTrack(this);
@@ -711,13 +858,13 @@ bool CrossingTrack::allPathsTo(
   else {
     if (direction() == inDir) {
       if (inFrom == mInLeftTrack) {
-        if (mOutRightTrack->allPathsTo(inId, inDir, ioPaths, this, inMarking)) {
+        if (mOutRightTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
           ioPaths.addTrack(this);
           result = true;
         }
       }
       else if (inFrom == mInRightTrack) {
-        if (mOutLeftTrack->allPathsTo(inId, inDir, ioPaths, this, inMarking)) {
+        if (mOutLeftTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
           ioPaths.addTrack(this);
           result = true;
         }
@@ -725,13 +872,13 @@ bool CrossingTrack::allPathsTo(
     }
     else { /* direction != inDir */
       if (inFrom == mOutLeftTrack) {
-        if (mInRightTrack->allPathsTo(inId, inDir, ioPaths, this, inMarking)) {
-          ioPaths.addTrack(this)
+        if (mInRightTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
+          ioPaths.addTrack(this);
           result = true;
         }
       }
       else if (inFrom == mOutRightTrack) {
-        if (mInLeftTrack->)allPathsTo(inId, inDir, ioPaths, this, inMarking)) {
+        if (mInLeftTrack->allPathsTo(inId, inDir, ioPaths, this, ioMarking)) {
           ioPaths.addTrack(this);
           result = true;
         }

@@ -2,49 +2,55 @@
 #define __TRACK_H__
 
 #include "Arduino.h"
+#include "Debug.h"
 
 /*
  * Direction of travel
  */
-enum {
+typedef enum {
   FORWARD_DIRECTION   = 0,
   BACKWARD_DIRECTION  = 1,
   NO_DIRECTION        = 2
-};
+} Direction;
 
 /*
  * Connectors of a track element
  */
-enum {
+typedef enum {
   INLET,
   LEFT_INLET,
   RIGHT_INLET,
   OUTLET,
   LEFT_OUTLET,
   RIGHT_OUTLET
-};
+} Connector;
 
 class PathSet;
 class HeadedTrackSet;
+class Track;
 
 #ifdef DEBUG
-void displayConnectorName(
-  const uint8_t inConnector,
-  const bool inNewLine = false
-);
-void displayDirection(uint8_t inDir);
+void displayConnectorName(const Connector inConnector);
+void displayConnectorNameln(const Connector inConnector);
+void displayDirection(const Direction inDir);
+void displayTrack(const uint16_t inId);
+void displayTrackln(const uint16_t inId);
+void displayTrack(const Track * inTrack);
+void displayTrackln(const Track * inTrack);
+void displayTrack(const Track & inTrack);
+void displayTrackln(const Track & inTrack);
 #endif
 
 #ifdef DEBUG
-#define N(name) F("name")
-#define N_ const __FlashStringHelper * inName
-#define N__ const __FlashStringHelper * inName,
-#define _N inName
+#define NAME(name) F("name")
+#define NAME_DECL_ALONE(name) const char * name
+#define NAME_DECL_FIRST(name) const char * name,
+#define NAME_ARG_FIRST(name) name,
 #else
-#define N(name)
-#define N_
-#define N__
-#define _N
+#define NAME(name)
+#define NAME_DECL_ALONE(name)
+#define NAME_DECL_FIRST(name)
+#define NAME_ARG_FIRST(name)
 #endif
 
 /*
@@ -54,41 +60,49 @@ class Track
 {
 private:
 #ifdef DEBUG
-  __FlashStringHelper * mName;
+  const char * mName;
 #endif
   uint16_t mIdentifier : 14; /* Track identifier */
-  uint8_t  mDirection  : 2;  /* Travel direction */
+  Direction mDirection : 2;  /* Travel direction */
 
   static uint16_t sCount;           /* Declared track count */
   static uint16_t sTrackTableSize;  /* hold the size during the construction */
-  static Track ** sTracks;          /* Table of track pointers */
+  static Track **sTracks;          /* Table of track pointers */
   static bool sTrackNetOk;   /* True after verifying no NULL pointer remains */
 
 protected:
-  void setDirection(const uint8_t inDir); /* Set the travelling direction */
-  virtual void connectFrom(
-    const Track * inTrack,
-    const uint8_t inConnector
-  ) = 0;
-  virtual bool allPathsTo(
-    const uint16_t inId,
-    const uint8_t inDir,
-    PathSet &ioPaths,
-    const Track * inFrom,
-    HeadedTrackSet &inMarking
-  ) = 0;
+  void setDirection(const Direction inDir); /* Set the travelling direction */
 
 public:
-  Track(N_);
-  uint8_t direction() { return mDirection; }
-  uint16_t identifier() { return mIdentifier; }
-  bool pathTo(Track & inTrack, uint8_t inDir, PathSet & ioPaths);
-  bool pathTo(uint16_t inId, uint8_t inDir, PathSet & ioPaths);
+  virtual bool connectFrom(Track * inTrack, const Connector inConnector) = 0;
+  virtual bool allPathsTo(
+    const uint16_t inId,
+    const Direction inDir,
+    PathSet & ioPaths,
+    const Track * inFrom,
+    HeadedTrackSet & ioMarking
+  ) = 0;
 
-  static const uint16_t count() { return sCount; }
-  static const uint8_t sizeForSet()
+  Track(NAME_DECL_FIRST(inName) const uint16_t inId);
+  Direction direction() const { return mDirection; }
+  uint16_t identifier() const { return mIdentifier; }
+  virtual bool connect(
+    const Connector inFromConnector,
+    Track & inToTrack,
+    const Connector inToConnector
+  ) = 0;
+  bool pathsTo(Track & inTrack, const Direction inDir, PathSet & ioPaths);
+  bool pathsTo(uint16_t inId, const Direction inDir, PathSet & ioPaths);
+
+#ifdef DEBUG
+  void print() const;
+  void println() const;
+#endif
+
+  static uint16_t count() { return sCount; }
+  static uint8_t sizeForSet()
   {
-    return ((sNombre >> 3) + ((sNombre & 7) != 0));
+    return ((sCount >> 3) + ((sCount & 7) != 0));
   }
 
   static void finalize();
@@ -100,57 +114,54 @@ public:
 /*
  * Dead-end track
  */
-class DeadEndTrack : public Track
+class DeadendTrack : public Track
 {
 private:
   Track * mOutTrack;  /* OUTLET track */
-  uint16_t mLength;   /* length of the dead-end track */
-
-protected:
-  virtual void connectFrom(
-    const Track * inTrack,
-    const uint8_t inConnector
-  );
-  virtual bool allPathsTo(
-    const uint16_t inId,
-    const uint8_t inDir,
-    PathSet &ioPaths,
-    const Track * inFrom,
-    HeadedTrackSet &inMarking
-  );
 
 public:
-  DeadEndTrack(N__ uint16_t inLength = 0u);
-  void connectTo(const Track & inTrack, const uint8_t inConnector);
+  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
+  virtual bool allPathsTo(
+    const uint16_t inId,
+    const Direction inDir,
+    PathSet & ioPaths,
+    const Track * inFrom,
+    HeadedTrackSet & ioMarking
+  );
+
+  DeadendTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
+  virtual bool connect(
+    const Connector inFromConnector,
+    Track & inToTrack,
+    const Connector inToConnector
+  );
 };
 
 /*
  * Normal track
  */
-class NormalTrack : public Track
+class BlockTrack : public Track
 {
 private:
   Track * mInTrack;
   Track * mOutTrack;
-  uint16_t mLength;   /* length of the normal track */
-
-protected:
-  virtual void connectFrom(
-    const Track * inTrack,
-    const uint8_t inConnector
-  );
-  virtual bool allPathsTo(
-    const uint16_t inId,
-    const uint8_t inDir,
-    PathSet &ioPaths,
-    const Track * inFrom,
-    HeadedTrackSet &inMarking
-  );
 
 public:
-  NormalTrack(N__ uint16_t inLength = 0u);
-  void connectInTo(Track & inTrack, uint8_t inConnector);
-  void connectOutTo(Track & inTrack, uint8_t inConnector);
+  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
+  virtual bool allPathsTo(
+    const uint16_t inId,
+    const Direction inDir,
+    PathSet & ioPaths,
+    const Track * inFrom,
+    HeadedTrackSet & ioMarking
+  );
+
+  BlockTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
+  virtual bool connect(
+    const Connector inFromConnector,
+    Track & inToTrack,
+    const Connector inToConnector
+  );
 };
 
 /*
@@ -162,28 +173,24 @@ private:
   Track * mInTrack;
   Track * mOutLeftTrack;
   Track * mOutRightTrack;
-  uint16_t mLeftLength;
-  uint16_t mRightLength;
   PathSet * mPartialPath;
 
-protected:
-  virtual void connectFrom(
-    const Track * inTrack,
-    const uint8_t inConnector
-  );
+public:
+  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
   virtual bool allPathsTo(
     const uint16_t inId,
-    const uint8_t inDir,
-    PathSet &ioPaths,
+    const Direction inDir,
+    PathSet & ioPaths,
     const Track * inFrom,
-    HeadedTrackSet &inMarking
+    HeadedTrackSet & ioMarking
   );
 
-public:
-  TurnoutTrack(N__ uint16_t inLeftLength = 0u, uint16_t inRightLength = 0u);
-  void connectInTo(Track & inTrack, uint8_t inConnector);
-  void connectOutLeftTo(Track & inTrack, uint8_t inConnector);
-  void connectOutRightTo(Track & inTrack, uint8_t inConnector);
+  TurnoutTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
+  virtual bool connect(
+    const Connector inFromConnector,
+    Track & inToTrack,
+    const Connector inToConnector
+  );
 };
 
 /*
@@ -196,56 +203,43 @@ protected:
   Track * mInRightTrack;
   Track * mOutLeftTrack;
   Track * mOutRightTrack;
-  uint16_t mLeftToRightLength;
-  uint16_t mRightToLeftLength;
-
-  virtual void connectFrom(
-    const Track * inTrack,
-    const uint8_t inConnector
-  );
-  virtual bool allPathsTo(
-    const uint16_t inId,
-    const uint8_t inDir,
-    PathSet &ioPaths,
-    const Track * inFrom,
-    HeadedTrackSet &inMarking
-  );
 
 public:
-  CrossingTrack(
-    N__
-    uint16_t inLeftToRightLength = 0u,
-    uint16_t inRightToLeftLength = 0u
+  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
+  virtual bool allPathsTo(
+    const uint16_t inId,
+    const Direction inDir,
+    PathSet & ioPaths,
+    const Track * inFrom,
+    HeadedTrackSet & ioMarking
   );
-  void connectInLeftTo(Track & inTrack, uint8_t inConnector);
-  void connectInRightTo(Track & inTrack, uint8_t inConnector);
-  void connectOutLeftTo(Track & inTrack, uint8_t inConnector);
-  void connectOutRightTo(Track & inTrack, uint8_t inConnector);
+
+  CrossingTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
+  virtual bool connect(
+    const Connector inFromConnector,
+    Track & inToTrack,
+    const Connector inToConnector
+  );
 };
 
 /*
  * Double slip track
  */
-class DoubleSlipTrack : public CrossingTrack
+class DoubleslipTrack : public CrossingTrack
 {
 private:
   PathSet * mPartialPath[2];
 
-protected:
+public:
   virtual bool allPathsTo(
     const uint16_t inId,
-    const uint8_t inDir,
-    PathSet &ioPaths,
+    const Direction inDir,
+    PathSet & ioPaths,
     const Track * inFrom,
-    HeadedTrackSet &inMarking
+    HeadedTrackSet & ioMarking
   );
 
-public:
-  DoubleSlipTrack(
-    N__
-    uint16_t inLeftToRightLength = 0u,
-    uint16_t inRightToLeftLength = 0u
-  );
+  DoubleslipTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
 };
 
 #endif /* __TRACK_H__ */
