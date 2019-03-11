@@ -43,19 +43,21 @@ void testItineraireManu(byte source, byte destination)
 }
 
 void setup() {
-  Track::finalize();
 
   Serial.begin(115200);
   Serial.println(F("\nGestionnaire reseau"));
 
   export_setup();
 
-  aiguille6.println();
+  Track::finalize();
 
 #ifdef DEBUG
+  if (Track::trackNetIsOk()) Serial.println("Tout est Ok !");
   Serial.print(F("Nombre de voies : "));
   Serial.println((unsigned long)Track::count());
 #endif
+
+  testItineraireManu(voie23_id, voie1_id);
 }    // fin setup
 
 

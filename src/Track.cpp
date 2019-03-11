@@ -106,6 +106,25 @@ void depthDisplayTrack(const Track * inTrack)
 
 #endif
 
+/* Macros to desplay errors in Debug mode */
+#ifdef DEBUG
+
+#define BAD_CONNECTOR_ERROR(message,obj,connector) \
+Serial.print(F(message)); \
+Serial.print(connectorErrorMsg); \
+displayTrackConnector(obj,connector);
+#define USED_CONNECTOR_ERROR(message,obj,connector) \
+Serial.print(F(message)); \
+Serial.print(usedConnectorMsg); \
+displayTrackConnector(obj,connector);
+
+#else
+
+#define BAD_CONNECTOR_ERROR(message,connector)
+#define USED_CONNECTOR_ERROR(message,obj,connector)
+
+#endif
+
 #define ensureTrackNetOk() if (! trackNetIsOk()) return false
 
 /*=============================================================================
@@ -114,7 +133,7 @@ void depthDisplayTrack(const Track * inTrack)
 uint16_t Track::sCount = 0;
 uint16_t Track::sTrackTableSize = 16;
 Track **Track::sTracks = NULL;
-bool Track::sTrackNetOk = false;
+uint16_t Track::sErrorCount = 0;
 
 /*---------------------------------------------------------------------------*/
 Track::Track(NAME_DECL_FIRST(inName) const uint16_t inId) :
@@ -144,6 +163,10 @@ void Track::finalize()
   if (sTrackTableSize > sCount) {
     sTrackTableSize = sCount;
     sTracks = (Track **)realloc(sTracks, sTrackTableSize * sizeof(Track **));
+  }
+  /* Check the track net */
+  for (uint16_t t = 0; t < sTrackTableSize; t++) {
+    if (! sTracks[t]->connectionsOk()) incErrorCount();
   }
 }
 
@@ -208,12 +231,12 @@ DeadendTrack::DeadendTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
 {}
 
 /*---------------------------------------------------------------------------*/
-bool DeadendTrack::connect(
+ErrorCode DeadendTrack::connect(
   const Connector inFromConnector,
   Track & inToTrack,
   const Connector inToConnector)
 {
-  bool result = true;
+  ErrorCode result = NO_ERROR;
 
   if (mOutTrack == NULL) {
     if (inFromConnector == OUTLET) {
@@ -221,52 +244,48 @@ bool DeadendTrack::connect(
       mOutTrack->connectFrom(this, inToConnector);
       setDirection(FORWARD_DIRECTION);
     }
-#ifdef DEBUG
     else {
-      Serial.print(F("DeadendTrack::connect/"));
-      Serial.print(connectorErrorMsg);
-      displayConnectorName(inFromConnector);
+      incErrorCount();
+      result = BAD_CONNECTOR;
+      BAD_CONNECTOR_ERROR("DeadendTrack::connect/", this, inFromConnector);
     }
-#endif
   }
   else {
-    result = false;
-#ifdef DEBUG
-    Serial.print(F("DeadendTrack::connect/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, OUTLET);
-#endif
+    incErrorCount();
+    result = USED_CONNECTOR;
+    USED_CONNECTOR_ERROR("DeadendTrack::connect/", this, OUTLET);
   }
   return result;
 }
 
 /*---------------------------------------------------------------------------*/
-bool DeadendTrack::connectFrom(Track * inTrack, const Connector inConnector)
+ErrorCode DeadendTrack::connectFrom(Track * inTrack, const Connector inConnector)
 {
-  bool result = true;
+  ErrorCode result = NO_ERROR;
 
   if (inConnector == OUTLET) {
     if (mOutTrack == NULL) {
       mOutTrack = inTrack;
       setDirection(BACKWARD_DIRECTION);
     }
-#ifdef DEBUG
     else {
-      Serial.print(F("DeadEndTrack::connectFrom/"));
-      Serial.print(usedConnectorMsg);
-      displayTrackConnector(this, inConnector);
+      incErrorCount();
+      result = USED_CONNECTOR;
+      USED_CONNECTOR_ERROR("DeadEndTrack::connectFrom/", this, inConnector);
     }
-#endif
   }
   else {
-    result = false;
-#ifdef DEBUG
-    Serial.print(F("DeadEndTrack::connectFrom/"));
-    Serial.print(connectorErrorMsg);
-    displayTrackConnector(this, inConnector);
-#endif
+    incErrorCount();
+    result = BAD_CONNECTOR;
+    BAD_CONNECTOR_ERROR("DeadEndTrack::connectFrom/", this, inConnector);
   }
   return result;
+}
+
+/*---------------------------------------------------------------------------*/
+bool DeadendTrack::connectionsOk()
+{
+  return mOutTrack != NULL;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -302,19 +321,19 @@ bool DeadendTrack::allPathsTo(
 }
 
 /*=============================================================================
- * Normal track
+ * Block
  */
 BlockTrack::BlockTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
   Track(NAME_ARG_FIRST(inName) inId), mInTrack(NULL), mOutTrack(NULL)
 {}
 
 /*---------------------------------------------------------------------------*/
-bool BlockTrack::connect(
+ErrorCode BlockTrack::connect(
   const Connector inFromConnector,
   Track &         inToTrack,
   const Connector inToConnector)
 {
-  bool result = true;
+  ErrorCode result = NO_ERROR;
 
   switch (inFromConnector) {
 
@@ -324,13 +343,7 @@ bool BlockTrack::connect(
         mInTrack->connectFrom(this, inToConnector);
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("BlockTrack::connect_INLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, INLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case OUTLET:
@@ -339,39 +352,31 @@ bool BlockTrack::connect(
         mOutTrack->connectFrom(this, inToConnector);
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("BlockTrack::connect_OUTLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, OUTLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
+
     case LEFT_INLET:
     case LEFT_OUTLET:
     case RIGHT_INLET:
     case RIGHT_OUTLET:
     default:
-      result = false;
-#ifdef DEBUG
-      Serial.print(F("BlockTrack::connect/"));
-      Serial.print(connectorErrorMsg);
-      displayTrackConnector(this, inFromConnector);
-#endif
+      result = BAD_CONNECTOR;
+      BAD_CONNECTOR_ERROR("BlockTrack::connect/", this, inFromConnector);
       break;
+  }
+  if (result == USED_CONNECTOR) {
+    incErrorCount();
+    USED_CONNECTOR_ERROR("BlockTrack::connect", this, inFromConnector);
   }
   return result;
 }
 
 /*---------------------------------------------------------------------------*/
-bool BlockTrack::connectFrom(
+ErrorCode BlockTrack::connectFrom(
   Track * inTrack,
   const Connector inConnector)
 {
-  bool result = true;
-#ifdef DEBUG
-  bool error = false;
-#endif
+  ErrorCode result = NO_ERROR;
 
   switch (inConnector) {
 
@@ -380,9 +385,7 @@ bool BlockTrack::connectFrom(
         mOutTrack = inTrack;
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case INLET:
@@ -390,9 +393,7 @@ bool BlockTrack::connectFrom(
         mInTrack = inTrack;
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case LEFT_INLET:
@@ -400,22 +401,21 @@ bool BlockTrack::connectFrom(
     case RIGHT_INLET:
     case RIGHT_OUTLET:
     default:
-      result = false;
-#ifdef DEBUG
-      Serial.print(F("BlockTrack::connectFrom/"));
-      Serial.print(connectorErrorMsg);
-      displayTrackConnector(this, inConnector);
-#endif
+      result = BAD_CONNECTOR;
+      BAD_CONNECTOR_ERROR("BlockTrack::connectFrom", this, inConnector);
       break;
   }
-#ifdef DEBUG
-  if (error) {
-    Serial.print(F("BlockTrack::connectFrom/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, inConnector);
+  if (result == USED_CONNECTOR) {
+    incErrorCount();
+    USED_CONNECTOR_ERROR("BlockTrack::connectFrom", this, inConnector);
   }
-#endif
   return result;
+}
+
+/*---------------------------------------------------------------------------*/
+bool BlockTrack::connectionsOk()
+{
+  return mInTrack != NULL && mOutTrack != NULL;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -467,12 +467,12 @@ TurnoutTrack::TurnoutTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
 {}
 
 /*---------------------------------------------------------------------------*/
-bool TurnoutTrack::connect(
+ErrorCode TurnoutTrack::connect(
   const Connector inFromConnector,
   Track &         inToTrack,
   const Connector inToConnector)
 {
-  bool result = true;
+  ErrorCode result = NO_ERROR;
 
   switch (inFromConnector) {
 
@@ -482,13 +482,7 @@ bool TurnoutTrack::connect(
         mInTrack->connectFrom(this, inToConnector);
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("TurnoutTrack::connect_INLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, INLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case LEFT_OUTLET:
@@ -497,13 +491,7 @@ bool TurnoutTrack::connect(
         mOutLeftTrack->connectFrom(this, inToConnector);
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("TurnoutTrack::connect_LEFT_OUTLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, LEFT_OUTLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case RIGHT_OUTLET:
@@ -512,38 +500,28 @@ bool TurnoutTrack::connect(
         mOutRightTrack->connectFrom(this, inToConnector);
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("TurnoutTrack::connect_RIGHT_OUTLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, RIGHT_OUTLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case LEFT_INLET:
     case RIGHT_INLET:
     case OUTLET:
     default:
-      result = false;
-#ifdef DEBUG
-      Serial.print(F("TurnoutTrack::connect/"));
-      Serial.print(connectorErrorMsg);
-      displayTrackConnector(this, inFromConnector);
-#endif
+      result = BAD_CONNECTOR;
+      BAD_CONNECTOR_ERROR("TurnoutTrack::connect/", this, inFromConnector);
       break;
+  }
+  if (result == USED_CONNECTOR) {
+    incErrorCount();
+    USED_CONNECTOR_ERROR("TurnoutTrack::connect", this, inFromConnector);
   }
   return result;
 }
 
 /*---------------------------------------------------------------------------*/
-bool TurnoutTrack::connectFrom(Track * inTrack, const Connector inConnector)
+ErrorCode TurnoutTrack::connectFrom(Track * inTrack, const Connector inConnector)
 {
-  bool result = true;
-
-  #ifdef DEBUG
-    bool error = false;
-  #endif
+  ErrorCode result = NO_ERROR;
 
   switch (inConnector) {
 
@@ -552,9 +530,7 @@ bool TurnoutTrack::connectFrom(Track * inTrack, const Connector inConnector)
         mInTrack = inTrack;
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case LEFT_OUTLET:
@@ -562,9 +538,7 @@ bool TurnoutTrack::connectFrom(Track * inTrack, const Connector inConnector)
         mOutLeftTrack = inTrack;
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case RIGHT_OUTLET:
@@ -572,31 +546,28 @@ bool TurnoutTrack::connectFrom(Track * inTrack, const Connector inConnector)
         mOutRightTrack = inTrack;
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case LEFT_INLET:
     case RIGHT_INLET:
     case OUTLET:
     default:
-      result = false;
-#ifdef DEBUG
-      Serial.print(F("TurnoutTrack::connectFrom/"));
-      Serial.print(connectorErrorMsg);
-      displayTrackConnector(this, inConnector);
-#endif
+      result = BAD_CONNECTOR;
+      BAD_CONNECTOR_ERROR("TurnoutTrack::connectFrom/", this, inConnector);
       break;
   }
-#ifdef DEBUG
-  if (error) {
-    Serial.print(F("TurnoutTrack::connectFrom/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, inConnector);
+  if (result == USED_CONNECTOR) {
+    incErrorCount();
+    USED_CONNECTOR_ERROR("TurnoutTrack::connectFrom", this, inConnector);
   }
-#endif
   return result;
+}
+
+/*---------------------------------------------------------------------------*/
+bool TurnoutTrack::connectionsOk()
+{
+  return mInTrack != NULL && mOutLeftTrack != NULL && mOutRightTrack != NULL;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -687,12 +658,12 @@ CrossingTrack::CrossingTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
 {}
 
 /*---------------------------------------------------------------------------*/
-bool CrossingTrack::connect(
+ErrorCode CrossingTrack::connect(
   const Connector inFromConnector,
   Track &         inToTrack,
   const Connector inToConnector)
 {
-  bool result = true;
+  ErrorCode result = NO_ERROR;
 
   switch (inFromConnector) {
     case LEFT_INLET:
@@ -701,80 +672,56 @@ bool CrossingTrack::connect(
         mInLeftTrack->connectFrom(this, inToConnector);
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("CrossingTrack::connect_LEFT_INLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, LEFT_INLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
+
     case RIGHT_INLET:
       if (mInRightTrack == NULL) {
         mInRightTrack = &inToTrack;
         mInRightTrack->connectFrom(this, inToConnector);
         setDirection(BACKWARD_DIRECTION);
       }
-  #ifdef DEBUG
-      else {
-        Serial.print(F("CrossingTrack::connect_RIGHT_INLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, RIGHT_INLET);
-      }
-  #endif
+      else result = USED_CONNECTOR;
       break;
+
     case LEFT_OUTLET:
       if (mOutLeftTrack == NULL) {
         mOutLeftTrack = &inToTrack;
         mOutLeftTrack->connectFrom(this, inToConnector);
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("CrossingTrack::connect_LEFT_OUTLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, LEFT_OUTLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
+
     case RIGHT_OUTLET:
       if (mOutRightTrack == NULL) {
         mOutRightTrack = &inToTrack;
         mOutRightTrack->connectFrom(this, inToConnector);
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else {
-        Serial.print(F("CrossingTrack::connect_RIGHT_OUTLET/"));
-        Serial.print(usedConnectorMsg);
-        displayTrackConnector(this, RIGHT_OUTLET);
-      }
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case INLET:
     case OUTLET:
     default:
-      result = false;
-#ifdef DEBUG
-      Serial.print(F("CrossingTrack::connect/"));
-      Serial.print(connectorErrorMsg);
-      displayTrackConnector(this, inFromConnector);
-#endif
+      result = BAD_CONNECTOR;
+      BAD_CONNECTOR_ERROR("CrossingTrack::connect", this, inFromConnector);
       break;
+  }
+  if (result == USED_CONNECTOR) {
+    incErrorCount();
+    USED_CONNECTOR_ERROR("CrossingTrack::connect", this, inFromConnector);
   }
   return result;
 }
 
 /*---------------------------------------------------------------------------*/
-bool CrossingTrack::connectFrom(
+ErrorCode CrossingTrack::connectFrom(
   Track * inTrack,
   const Connector inConnector)
 {
-  bool result = true;
-#ifdef DEBUG
-  bool error = false;
-#endif
+  ErrorCode result = NO_ERROR;
 
   switch (inConnector) {
 
@@ -783,9 +730,7 @@ bool CrossingTrack::connectFrom(
         mInLeftTrack = inTrack;
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case RIGHT_INLET:
@@ -793,9 +738,7 @@ bool CrossingTrack::connectFrom(
         mInRightTrack = inTrack;
         setDirection(FORWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case LEFT_OUTLET:
@@ -803,9 +746,7 @@ bool CrossingTrack::connectFrom(
         mOutLeftTrack = inTrack;
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case RIGHT_OUTLET:
@@ -813,30 +754,30 @@ bool CrossingTrack::connectFrom(
         mOutRightTrack = inTrack;
         setDirection(BACKWARD_DIRECTION);
       }
-#ifdef DEBUG
-      else error = true;
-#endif
+      else result = USED_CONNECTOR;
       break;
 
     case INLET:
     case OUTLET:
     default:
-      result = false;
-#ifdef DEBUG
-      Serial.print(F("CrossingTrack::connectFrom/"));
-      Serial.print(connectorErrorMsg);
-      displayTrackConnector(this, inConnector);
-#endif
+      result = BAD_CONNECTOR;
+      BAD_CONNECTOR_ERROR("CrossingTrack::connectFrom", this, inConnector);
       break;
   }
-#ifdef DEBUG
-  if (error) {
-    Serial.print(F("CrossingTrack::connectFrom/"));
-    Serial.print(usedConnectorMsg);
-    displayTrackConnector(this, inConnector);
+  if (result == USED_CONNECTOR) {
+    incErrorCount();
+    USED_CONNECTOR_ERROR("CrossingTrack::connectFrom", this, inConnector);
   }
-#endif
   return result;
+}
+
+/*---------------------------------------------------------------------------*/
+bool CrossingTrack::connectionsOk()
+{
+  return mInLeftTrack != NULL &&
+         mInRightTrack != NULL &&
+         mOutLeftTrack != NULL &&
+         mOutRightTrack != NULL;
 }
 
 /*---------------------------------------------------------------------------*/

@@ -25,6 +25,12 @@ typedef enum {
   RIGHT_OUTLET
 } Connector;
 
+typedef enum {
+  BAD_CONNECTOR,
+  USED_CONNECTOR,
+  NO_ERROR
+} ErrorCode;
+
 class PathSet;
 class HeadedTrackSet;
 class Track;
@@ -53,7 +59,7 @@ void displayTrackln(const Track & inTrack);
 #define NAME_ARG_FIRST(name)
 #endif
 
-/*
+/*-----------------------------------------------------------------------------
  * Abstract class for tracks
  */
 class Track
@@ -65,16 +71,22 @@ private:
   uint16_t mIdentifier : 14; /* Track identifier */
   Direction mDirection : 2;  /* Travel direction */
 
-  static uint16_t sCount;           /* Declared track count */
-  static uint16_t sTrackTableSize;  /* hold the size during the construction */
-  static Track **sTracks;          /* Table of track pointers */
-  static bool sTrackNetOk;   /* True after verifying no NULL pointer remains */
+  static uint16_t sCount;          /* Declared track count                  */
+  static uint16_t sTrackTableSize; /* hold the size during the construction */
+  static Track **sTracks;          /* Table of track pointers               */
+  static uint16_t sErrorCount;     /* Number of errors during connections
+                                      and during finalize                   */
 
 protected:
   void setDirection(const Direction inDir); /* Set the travelling direction */
+  static void incErrorCount() { sErrorCount++; }
 
 public:
-  virtual bool connectFrom(Track * inTrack, const Connector inConnector) = 0;
+  /* return true if the track is a block */
+  virtual bool isBlock() { return false; }
+  /* Connect to a connector of this track from a track */
+  virtual ErrorCode connectFrom(Track * inTrack, const Connector inConnector) = 0;
+  /* Build paths from this track to track having inId */
   virtual bool allPathsTo(
     const uint16_t inId,
     const Direction inDir,
@@ -82,15 +94,19 @@ public:
     const Track * inFrom,
     HeadedTrackSet & ioMarking
   ) = 0;
-
+  /* Constructor */
   Track(NAME_DECL_FIRST(inName) const uint16_t inId);
+  /* Get the connection direction of the track */
   Direction direction() const { return mDirection; }
+  /* Get the identifier of the track */
   uint16_t identifier() const { return mIdentifier; }
-  virtual bool connect(
+  /* Connect a track connector to a connector of this track */
+  virtual ErrorCode connect(
     const Connector inFromConnector,
     Track & inToTrack,
     const Connector inToConnector
   ) = 0;
+  virtual bool connectionsOk() = 0;
   bool pathsTo(Track & inTrack, const Direction inDir, PathSet & ioPaths);
   bool pathsTo(uint16_t inId, const Direction inDir, PathSet & ioPaths);
 
@@ -108,7 +124,7 @@ public:
   static void finalize();
   static Track & trackForId(uint16_t inId);
   static bool checkTrackNet();
-  static bool trackNetIsOk() { return sTrackNetOk; }
+  static bool trackNetIsOk() { return sErrorCount == 0; }
 };
 
 /*
@@ -117,10 +133,10 @@ public:
 class DeadendTrack : public Track
 {
 private:
-  Track * mOutTrack;  /* OUTLET track */
+  Track * mOutTrack;  /* OUTLET connector */
 
 public:
-  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
+  virtual ErrorCode connectFrom(Track * inTrack, const Connector inConnector);
   virtual bool allPathsTo(
     const uint16_t inId,
     const Direction inDir,
@@ -130,11 +146,12 @@ public:
   );
 
   DeadendTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
-  virtual bool connect(
+  virtual ErrorCode connect(
     const Connector inFromConnector,
     Track & inToTrack,
     const Connector inToConnector
   );
+  virtual bool connectionsOk();
 };
 
 /*
@@ -143,11 +160,12 @@ public:
 class BlockTrack : public Track
 {
 private:
-  Track * mInTrack;
-  Track * mOutTrack;
+  Track * mInTrack;   /* INLET connector  */
+  Track * mOutTrack;  /* OUTLET connector */
 
 public:
-  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
+  virtual bool isBlock() { return true; }
+  virtual ErrorCode connectFrom(Track * inTrack, const Connector inConnector);
   virtual bool allPathsTo(
     const uint16_t inId,
     const Direction inDir,
@@ -157,11 +175,12 @@ public:
   );
 
   BlockTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
-  virtual bool connect(
+  virtual ErrorCode connect(
     const Connector inFromConnector,
     Track & inToTrack,
     const Connector inToConnector
   );
+  virtual bool connectionsOk();
 };
 
 /*
@@ -170,13 +189,14 @@ public:
 class TurnoutTrack : public Track
 {
 private:
-  Track * mInTrack;
-  Track * mOutLeftTrack;
-  Track * mOutRightTrack;
+  Track * mInTrack;       /* INLET connector        */
+  Track * mOutLeftTrack;  /* LEFT_OUTLET connector  */
+  Track * mOutRightTrack; /* RIGHT_OUTLET connector */
   PathSet * mPartialPath;
+  Connector mPosition;    /* The position of the Turnout */
 
 public:
-  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
+  virtual ErrorCode connectFrom(Track * inTrack, const Connector inConnector);
   virtual bool allPathsTo(
     const uint16_t inId,
     const Direction inDir,
@@ -186,11 +206,14 @@ public:
   );
 
   TurnoutTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
-  virtual bool connect(
+  virtual ErrorCode connect(
     const Connector inFromConnector,
     Track & inToTrack,
     const Connector inToConnector
   );
+  virtual bool connectionsOk();
+
+  void setPosition(const Connector inPosition);
 };
 
 /*
@@ -205,7 +228,7 @@ protected:
   Track * mOutRightTrack;
 
 public:
-  virtual bool connectFrom(Track * inTrack, const Connector inConnector);
+  virtual ErrorCode connectFrom(Track * inTrack, const Connector inConnector);
   virtual bool allPathsTo(
     const uint16_t inId,
     const Direction inDir,
@@ -215,11 +238,12 @@ public:
   );
 
   CrossingTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
-  virtual bool connect(
+  virtual ErrorCode connect(
     const Connector inFromConnector,
     Track & inToTrack,
     const Connector inToConnector
   );
+  virtual bool connectionsOk();
 };
 
 /*
@@ -240,6 +264,9 @@ public:
   );
 
   DoubleslipTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
+
+  void setInPosition(const Connector inPosition);
+  void setOutPosition(const Connector outPosition);
 };
 
 #endif /* __TRACK_H__ */
