@@ -25,10 +25,19 @@ typedef enum {
   RIGHT_OUTLET
 } Connector;
 
+/*
+ * Positions of turnout, single and double slip
+ */
 typedef enum {
+  NO_POSITION,
+  LEFT_POSITION,
+  RIGHT_POSITION
+} Position;
+
+typedef enum {
+  NO_ERROR,
   BAD_CONNECTOR,
-  USED_CONNECTOR,
-  NO_ERROR
+  USED_CONNECTOR
 } ErrorCode;
 
 class PathSet;
@@ -193,7 +202,7 @@ private:
   Track * mOutLeftTrack;  /* LEFT_OUTLET connector  */
   Track * mOutRightTrack; /* RIGHT_OUTLET connector */
   PathSet * mPartialPath;
-  Connector mPosition;    /* The position of the Turnout */
+  Position mPosition;    /* The position of the Turnout */
 
 public:
   virtual ErrorCode connectFrom(Track * inTrack, const Connector inConnector);
@@ -213,7 +222,7 @@ public:
   );
   virtual bool connectionsOk();
 
-  void setPosition(const Connector inPosition);
+  void setPosition(const Position inPosition);
 };
 
 /*
@@ -249,24 +258,26 @@ public:
 /*
  * Double slip track
  */
-class DoubleslipTrack : public CrossingTrack
-{
-private:
-  PathSet * mPartialPath[2];
-
-public:
-  virtual bool allPathsTo(
-    const uint16_t inId,
-    const Direction inDir,
-    PathSet & ioPaths,
-    const Track * inFrom,
-    HeadedTrackSet & ioMarking
-  );
-
-  DoubleslipTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
-
-  void setInPosition(const Connector inPosition);
-  void setOutPosition(const Connector outPosition);
-};
+// class DoubleslipTrack : public CrossingTrack
+// {
+// private:
+//   PathSet * mPartialPath[2];
+//   Position mInPosition:3;     /* The position of on the In side  */
+//   Position mOutPosition:3;    /* The position of on the Out side */
+//
+// public:
+//   virtual bool allPathsTo(
+//     const uint16_t inId,
+//     const Direction inDir,
+//     PathSet & ioPaths,
+//     const Track * inFrom,
+//     HeadedTrackSet & ioMarking
+//   );
+//
+//   DoubleslipTrack(NAME_DECL_FIRST(inName) const uint16_t inId);
+//
+//   void setInPosition(const Position inPosition);
+//   void setOutPosition(const Position outPosition);
+// };
 
 #endif /* __TRACK_H__ */

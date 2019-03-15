@@ -463,7 +463,8 @@ TurnoutTrack::TurnoutTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
   mInTrack(NULL),
   mOutLeftTrack(NULL),
   mOutRightTrack(NULL),
-  mPartialPath(NULL)
+  mPartialPath(NULL),
+  mPosition(NO_POSITION)
 {}
 
 /*---------------------------------------------------------------------------*/
@@ -644,6 +645,12 @@ bool TurnoutTrack::allPathsTo(
   }
   decDepth();
   return result;
+}
+
+/*---------------------------------------------------------------------------*/
+void TurnoutTrack::setPosition(const Position inPosition)
+{
+  mPosition = inPosition;
 }
 
 /*=============================================================================
@@ -829,3 +836,25 @@ bool CrossingTrack::allPathsTo(
   decDepth();
   return result;
 }
+
+/*=============================================================================
+ * DoubleslipTrack
+ */
+// DoubleslipTrack::DoubleslipTrack(NAME_DECL_FIRST(inName) const uint16_t inId) :
+//   CrossingTrack(NAME_ARG_FIRST(inName) inId),
+//   mInPosition(NO_POSITION),
+//   mOutPosition(NO_POSITION)
+// {
+// }
+//
+// /*---------------------------------------------------------------------------*/
+// void DoubleslipTrack::setInPosition(const Position inPosition)
+// {
+//   mInPosition = inPosition;
+// }
+//
+// /*---------------------------------------------------------------------------*/
+// void DoubleslipTrack::setOutPosition(const Position inPosition)
+// {
+//   mOutPosition = inPosition;
+// }
